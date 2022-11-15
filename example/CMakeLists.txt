@@ -20,6 +20,7 @@ set(EXAMPLE_LIST
   plan_execution
   primitive_execution
   teach_by_demonstration
+  Key_press
 )
 
 # Additional examples for Mac

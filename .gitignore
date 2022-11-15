@@ -1,6 +1,9 @@
 .vscode
 .vs
 .DS_Store
+*.csv
+*.zip
+*.xlsx
 config.h
 build/
 html/
