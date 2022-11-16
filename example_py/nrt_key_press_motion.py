@@ -105,7 +105,7 @@ def main():
 
         # Send command to robot
         robot.executePrimitive(
-            "MoveL(target=0.69 -0.11 0.058 180 0 180 WORLD , maxVel=0.2, targetTolLevel=1)")
+            "MoveL(target=0.69 -0.11 0.115 180 0 180 WORLD , maxVel=0.2, targetTolLevel=1)")
             # "MoveL(target=0.69 -0.11 0.2 180 0 180 WORLD , maxVel=0.2)")
 
         # Wait for reached target
@@ -117,9 +117,9 @@ def main():
         # press_key= False
         if(press_key):
             max_wrench = [5.0, 5.0, 10, 2.0, 2.0, 2.0]
-            des_vel = 0.0015
+            des_vel = 0.001
             retreat_force=0.8
-            num_repeat = 5
+            num_repeat = 1
 
             # pressRelease(robot,robot_states,mode,max_wrench,retreat_force,num_repeat,des_vel)
             pressRelease_joint(robot,robot_states,mode,max_wrench,retreat_force,num_repeat,des_vel)

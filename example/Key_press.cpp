@@ -70,7 +70,9 @@ void PressRlease(flexiv::Robot& robot, flexiv::RobotStates& robotStates,
         myfile << "x" << ',' << "y" << ',' << "z" << ',' //
                << "forceZ" << ',' << "rawforceZ" << ',' //
                << "q1" << ',' << "q2" << ',' << "q3" << ',' << "q4" << ','
-               << "q5" << ',' << "q6" << ',' << "q7" << ',' << '\n';
+               << "q5" << ',' << "q6" << ',' << "q7" << ',' << "qd1" << ','
+               << "qd2" << ',' << "qd3" << ',' << "qd4" << ',' << "qd5" << ','
+               << "qd6" << ',' << "qd7" << '\n';
 
         // Set mode after robot is operational
         switchMode(robot, flexiv::MODE_PRIMITIVE_EXECUTION);
@@ -134,7 +136,9 @@ void PressRlease(flexiv::Robot& robot, flexiv::RobotStates& robotStates,
                    << robotStates.q[0] << ',' << robotStates.q[1] << ','
                    << robotStates.q[2] << ',' << robotStates.q[3] << ','
                    << robotStates.q[4] << ',' << robotStates.q[5] << ','
-                   << robotStates.q[6] << ',' << '\n';
+                   << robotStates.q[6] << ',' << q_des[0] << ',' << q_des[1]
+                   << ',' << q_des[2] << ',' << q_des[3] << ',' << q_des[4]
+                   << ',' << q_des[5] << ',' << q_des[6] << ',' << '\n';
         }
         myfile.close();
     }
@@ -248,7 +252,7 @@ int main(int argc, char* argv[])
 
         // Send command to robot
         robot.executePrimitive(
-            "MoveL(target=0.69 -0.11 0.058 180 0 180 WORLD  WORLD_ORIGIN,, "
+            "MoveL(target=0.69 -0.11 0.115 180 0 180 WORLD  WORLD_ORIGIN,, "
             "maxVel=0.2, "
             "targetTolLevel=1)");
 
@@ -264,7 +268,7 @@ int main(int argc, char* argv[])
         model.updateModel(robotStates.q, robotStates.dtheta);
 
         // Inputs
-        double des_vel = 0.005;
+        double des_vel = 0.001;
         double max_bottom_out_force = 1;
         int repeat_times = 3;
 
