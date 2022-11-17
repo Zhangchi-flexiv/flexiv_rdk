@@ -228,7 +228,7 @@ int main(int argc, char* argv[])
 
         // Enable the robot, make sure the E-stop is released before enabling
         log.info("Enabling robot ...");
-        // robot.enable();
+        robot.enable();
 
         // Wait for the robot to become operational
         int secondsWaited = 0;
