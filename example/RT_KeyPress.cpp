@@ -25,14 +25,6 @@ const int k_robotDofs = 7;
 
 /** RT loop period [sec] */
 const double k_loopPeriod = 0.001;
-
-/** Sine-sweep trajectory amplitude and frequency */
-const std::vector<double> k_sineAmp
-    = {0.035, 0.035, 0.035, 0.035, 0.035, 0.035, 0.035};
-const std::vector<double> k_sineFreq = {0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3};
-
-/** Type of motion specified by user */
-std::string motionType = {};
 }
 
 void switchMode(flexiv::Robot& robot, flexiv::Mode mode)
@@ -50,6 +42,7 @@ void switchMode(flexiv::Robot& robot, flexiv::Mode mode)
 void periodicTask(flexiv::Robot* robot, flexiv::Scheduler* scheduler,
     flexiv::Log* log, flexiv::RobotStates& robotStates, float des_vel,
     float max_bottom_out_force, int* move_direction, flexiv::Model* model,
+    std::vector<double>* q_des, std::vector<double>* qd_vector,
     std::stack<std::vector<double>>* q_stack,
     std::stack<std::vector<double>>* qd_stack, std::ofstream* myfile)
 {
@@ -64,63 +57,53 @@ void periodicTask(flexiv::Robot* robot, flexiv::Scheduler* scheduler,
         // Read robot states
         robot->getRobotStates(robotStates);
 
-        static Eigen::VectorXd xd_des = Eigen::VectorXd::Zero(6);
-        // int move_direction = -1;
-        xd_des[2] = des_vel * (*move_direction);
-        static std::vector<double> q_des = robotStates.q;
-        static std::vector<double> qd_vector = {0, 0, 0, 0, 0, 0, 0};
+        // update/init control/robot status
+        static Eigen::VectorXd base_xd_des = Eigen::VectorXd::Zero(6);
+        static Eigen::VectorXd tcp_xd_des = Eigen::VectorXd::Zero(6);
         static std::vector<double> q_acc = {0, 0, 0, 0, 0, 0, 0};
 
-        // Eigen::VectorXd xd_des = Eigen::VectorXd::Zero(6);
-        robot->getRobotStates(robotStates);
-        model->updateModel(robotStates.q, robotStates.dtheta);
-        auto J = model->getJacobian("flange");
-        auto J_inv = J.inverse();
-
-        if ((*move_direction) < 0
+        Eigen::Quaterniond quat(robotStates.flangePose[3],
+            robotStates.flangePose[4], robotStates.flangePose[5],
+            robotStates.flangePose[6]);
+        tcp_xd_des[2] = des_vel * (*move_direction);
+        base_xd_des.head(3) = quat.normalized().toRotationMatrix() * tcp_xd_des;
+        model->updateModel(*q_des, *qd_vector);
+        Eigen::MatrixXd J = model->getJacobian("flange");
+        Eigen::MatrixXd J_tmp = J * J.transpose();
+        Eigen::MatrixXd J_inv = J.transpose() * J_tmp.inverse();
+        Eigen::VectorXd qd = J_inv * base_xd_des;
+        if ((*move_direction) > 0
             && fabs(robotStates.extForceInTcpFrame[2])
                    > fabs(max_bottom_out_force)) {
-            *move_direction = 1;
-            xd_des[2] = des_vel * (*move_direction);
+            (*move_direction) = -1;
             std::cout << " revert!!!!!!!!!!!!" << std::endl;
         }
-        if ((*move_direction) < 0) {
-            Eigen::VectorXd qd = J_inv * xd_des;
-            for (int i = 0; i < 7; i++) {
-                qd_vector[i] = qd[i];
-                q_des[i] += qd[i] * 0.001;
+        if ((*move_direction) > 0) {
+
+            for (int i = 0; i < k_robotDofs; i++) {
+                (*qd_vector)[i] = qd[i];
+                (*q_des)[i] += qd[i] * k_loopPeriod;
             }
-            q_stack->push(q_des);
-            qd_stack->push(qd_vector);
-            // std::cout << " q_des " << q_des[1] << "xd_des[2]" << xd_des[2]
-            //   << std::endl;
+            q_stack->push(*q_des);
+            qd_stack->push(*qd_vector);
         } else if (q_stack->size() == 0) {
             scheduler->stop();
         } else {
-            q_des = q_stack->top();
-            qd_vector = qd_stack->top();
-            for (int i = 0; i < 7; i++) {
-                qd_vector[i] *= -1;
+            *q_des = q_stack->top();
+            *qd_vector = qd_stack->top();
+            for (int i = 0; i < k_robotDofs; i++) {
+                (*qd_vector)[i] *= -1;
             }
             q_stack->pop();
             qd_stack->pop();
         }
 
-        // robot.sendJointPosition(
-        //     q_des, qd_vector, q_acc, max_qd, max_qdd, max_qddd);
-        robot->streamJointPosition(q_des, qd_vector, q_acc);
+        robot->streamJointPosition(*q_des, *qd_vector, q_acc);
 
         // Record data
         *myfile << robotStates.flangePose[0] << ',' << robotStates.flangePose[1]
                 << ',' << robotStates.flangePose[2] << ','
-                << robotStates.extForceInTcpFrame[2] << ','
-                << robotStates.camPose[2] << ',' //
-                << robotStates.q[0] << ',' << robotStates.q[1] << ','
-                << robotStates.q[2] << ',' << robotStates.q[3] << ','
-                << robotStates.q[4] << ',' << robotStates.q[5] << ','
-                << robotStates.q[6] << ',' << q_des[0] << ',' << q_des[1] << ','
-                << q_des[2] << ',' << q_des[3] << ',' << q_des[4] << ','
-                << q_des[5] << ',' << q_des[6] << ',' << '\n';
+                << robotStates.extForceInTcpFrame[2] << '\n';
 
     } catch (const flexiv::Exception& e) {
         log->error(e.what());
@@ -135,63 +118,55 @@ void PressRlease(flexiv::Robot* robot, flexiv::RobotStates& robotStates,
 {
 
     for (int i = 0; i < repeat_times; i++) {
-        std::cout << "Press " << i + 1 << std::endl;
-        //////////////////////////////////////////////////
-        Eigen::VectorXd xd_des = Eigen::VectorXd::Zero(6);
-        int move_direction = -1;
-        xd_des[2] = des_vel * move_direction;
-        std::vector<double> q_des = robotStates.q;
-        std::vector<double> qd_vector = {0, 0, 0, 0, 0, 0, 0};
-        std::vector<double> q_acc = {0, 0, 0, 0, 0, 0, 0};
-        // std::vector<double> max_qd = {1, 1, 1, 1, 1, 1, 1};
-        // std::vector<double> max_qdd = {5, 5, 5, 5, 5, 5, 5};
-        // std::vector<double> max_qddd = {5, 5, 5, 5, 5, 5, 5};
-        std::stack<std::vector<double>> q_stack;
-        std::stack<std::vector<double>> qd_stack;
 
+        std::cout << "Press Test:" << i + 1 << std::endl;
+
+        //  only record data
         char nowChar[100];
         time_t now = time(0);
         struct tm* tm_now = localtime(&now);
-
         strftime(nowChar, 100, "%m-%d-%Y-%H:%M:%S", tm_now);
         std::string nowString(nowChar);
         std::ofstream myfile;
         myfile.open("PressTest" + std::to_string(i) + "_" + nowString + ".csv");
         myfile << "x" << ',' << "y" << ',' << "z" << ',' //
-               << "forceZ" << ',' << "rawforceZ" << ',' //
-               << "q1" << ',' << "q2" << ',' << "q3" << ',' << "q4" << ','
-               << "q5" << ',' << "q6" << ',' << "q7" << ',' << "qd1" << ','
-               << "qd2" << ',' << "qd3" << ',' << "qd4" << ',' << "qd5" << ','
-               << "qd6" << ',' << "qd7" << '\n';
+               << "forceZ" << '\n';
 
-        // Set mode after robot is operational
+        //  <<<<<<<<<<<  CaliForceSensor right before the prese  <<<<<<<<
+        // Switch mode for calibrate FT-sensor
         switchMode(*robot, flexiv::MODE_PRIMITIVE_EXECUTION);
-
         robot->executePrimitive(
             "CaliForceSensor(dataCollectionTime=1.0, enableStaticCheck=1)");
-
-        // Wait for reached target
+        // Wait for the end of Calibrate force sensor
         while (flexiv::utility::parsePtStates(
                    robot->getPrimitiveStates(), "reachedTarget")
                != "1") {
             std::this_thread::sleep_for(std::chrono::seconds(1));
         }
+        //  >>>>>>>>>>  CaliForceSensor right before the prese   >>>>>>>>>>
 
+        //  <<<<<<<<<<<  Motion control part  <<<<<<<<
+        // init inputs for real-time robot control
+        robot->getRobotStates(robotStates);
+        int move_direction = 1;
+        std::stack<std::vector<double>> q_stack;
+        std::stack<std::vector<double>> qd_stack;
+        std::vector<double> q_des = robotStates.q;
+        std::vector<double> qd_vector = {0, 0, 0, 0, 0, 0, 0};
+        // Switch mode for preprare PressRelease motion control
         switchMode(*robot, flexiv::MODE_JOINT_POSITION);
         flexiv::Scheduler scheduler;
         scheduler.addTask(
             std::bind(periodicTask, robot, &scheduler, log, robotStates,
-                des_vel, max_bottom_out_force, &move_direction, model, &q_stack,
-                &qd_stack, &myfile),
+                des_vel, max_bottom_out_force, &move_direction, model, &q_des,
+                &qd_vector, &q_stack, &qd_stack, &myfile),
             "HP periodic", 1, 45);
-
         // Start all added tasks, this is by default a blocking method
         scheduler.start();
+        //  >>>>>>>>>>  Motion control part   >>>>>>>>>>
+
         std::cout << " end!!!" << std::endl;
-        // bool exit_flag = false;
-        // while (!exit_flag) {
-        //     std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        // }
+
         myfile.close();
     }
 }
@@ -199,11 +174,10 @@ void PressRlease(flexiv::Robot* robot, flexiv::RobotStates& robotStates,
 void printHelp()
 {
     // clang-format off
-    std::cout << "Required arguments: [robot IP] [local IP]" << std::endl;
+    std::cout << "Required arguments: [robot IP] [local IP] [press]" << std::endl;
     std::cout << "    robot IP: address of the robot server" << std::endl;
     std::cout << "    local IP: address of this PC" << std::endl;
-    std::cout << "Optional arguments: [--hold]" << std::endl;
-    std::cout << "    --hold: robot holds current joint positions, otherwise do a sine-sweep" << std::endl;
+    std::cout << "    press: 0 for not press, others for press" << std::endl;
     std::cout << std::endl;
     // clang-format on
 }
@@ -215,7 +189,7 @@ int main(int argc, char* argv[])
 
     // Parse Parameters
     //=============================================================================
-    if (argc < 3
+    if (argc < 4
         || flexiv::utility::programArgsExistAny(argc, argv, {"-h", "--help"})) {
         printHelp();
         return 1;
@@ -226,16 +200,8 @@ int main(int argc, char* argv[])
 
     // IP of the workstation PC running this program
     std::string localIP = argv[2];
-
-    // Type of motion specified by user
-    if (flexiv::utility::programArgsExist(argc, argv, "--hold")) {
-        log.info("Robot holding current pose");
-        motionType = "hold";
-    } else {
-        log.info("Robot running joint sine-sweep");
-        motionType = "sine-sweep";
-    }
-
+    // std::string argv3 = argv[3];
+    int repeat_times = atoi(argv[3]);
     try {
         // RDK Initialization
         //=============================================================================
@@ -278,19 +244,6 @@ int main(int argc, char* argv[])
         log.info("Robot is now operational");
 
         switchMode(robot, flexiv::MODE_PRIMITIVE_EXECUTION);
-
-        ///// MoveL to pre press position //////
-        // log.info("Executing primitive: Home");
-        // // Send command to robot
-        // robot.executePrimitive("Home()");
-        // // Wait for robot to reach target location by checking for
-        // // "reachedTarget = 1" in the list of current primitive states
-        // while (flexiv::utility::parsePtStates(
-        //            robot.getPrimitiveStates(), "reachedTarget")
-        //        != "1") {
-        //     std::this_thread::sleep_for(std::chrono::seconds(1));
-        // }
-
         ///// MoveL to pre press position /////
         log.info("Executing primitive: MoveL");
         // Send command to robot
@@ -306,20 +259,14 @@ int main(int argc, char* argv[])
             std::this_thread::sleep_for(std::chrono::seconds(1));
         }
 
-        if (1) {
-            switchMode(robot, flexiv::MODE_JOINT_POSITION);
+        switchMode(robot, flexiv::MODE_JOINT_POSITION);
+        flexiv::Scheduler scheduler;
+        // some parameter for the press/release test
+        double des_vel = 0.01;
+        double max_bottom_out_force = 1;
+        PressRlease(&robot, robotStates, &model, &log, des_vel,
+            max_bottom_out_force, repeat_times);
 
-            // Periodic Tasks
-            //=============================================================================
-            flexiv::Scheduler scheduler;
-            // Add periodic task with 1ms interval and highest applicable
-            // priority
-            double des_vel = 0.0005;
-            double max_bottom_out_force = 1;
-            int repeat_times = 3;
-            PressRlease(&robot, robotStates, &model, &log, des_vel,
-                max_bottom_out_force, repeat_times);
-        }
     } catch (const flexiv::Exception& e) {
         log.error(e.what());
         return 1;
