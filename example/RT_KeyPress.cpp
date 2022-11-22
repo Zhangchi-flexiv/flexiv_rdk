@@ -37,6 +37,7 @@ const float k_desiredVelocity = 0.0005;
 const float k_max_contact_force = 1;
 }
 
+// helper function for switch the RDK control mode
 void switchMode(flexiv::Robot& robot, flexiv::Mode mode)
 {
     // Set mode after robot is operational
@@ -48,6 +49,7 @@ void switchMode(flexiv::Robot& robot, flexiv::Mode mode)
     }
 }
 
+// Calculate the transformation matrix for Modefied DH Forward kinematics
 Matrix4d transform_MDH(double theta, double alpha, double a_nom, double d_nom)
 {
     double stheta = std::sin(theta);
@@ -58,11 +60,10 @@ Matrix4d transform_MDH(double theta, double alpha, double a_nom, double d_nom)
     H << ctheta, -stheta, 0, a_nom, stheta * calpha, ctheta * calpha, -salpha,
         -salpha * d_nom, stheta * salpha, ctheta * salpha, calpha,
         calpha * d_nom, 0, 0, 0, 1;
-    // std::cout<<H<<std::endl;
     return H;
 }
 
-// Forward kinematics
+// Calculating the Forward Kinematics for each joints
 std::vector<Matrix4d> getT_MDH(std::vector<double> theta) // in radian
 {
     // MDH parameters
@@ -80,23 +81,6 @@ std::vector<Matrix4d> getT_MDH(std::vector<double> theta) // in radian
     T_MDH.push_back(H_flange);
     return T_MDH;
 }
-
-// T_DE: Coordinate systems: D and E (origin frame E in MDH along Z )
-std::vector<Matrix4d> getT_DE()
-{
-    std::vector<Matrix4d> T_DE {};
-    double z_MDH2E[8] = {-0.1535, 0.0215, -0.1405, 0.0245, -0.1405, -0.0205,
-        0.0840, 0.01975}; // z offset between MDH and E frame, in meter
-    // consider the link frame should be in the output flange of the joint, an
-    // offset should be considered
-
-    for (int i = 0; i < 8; i++) {
-        Matrix4d T_DEi = Matrix4d::Identity();
-        T_DEi(2, 3) = z_MDH2E[i];
-        T_DE.push_back(T_DEi);
-    }
-    return T_DE;
-} // end of T_DE
 
 std::vector<double> deg2rad(std::vector<double> theta_deg)
 {
@@ -146,37 +130,24 @@ void periodicTask(flexiv::Robot* robot, flexiv::Scheduler* scheduler,
         // inverse kinematics to get joint velocity
         Eigen::VectorXd dq = J_inv * base_xd_des;
 
-        ////////////////////////////////
-
-        Matrix4d fk_ori = Matrix4d::Identity();
-        // std::vector<Matrix4d> T_i2base_ori {};
-        // T_i2base_ori.push_back(fk_ori);robotStates.theta
+        //// Calulating the Forward Kinematics based on motor position and robot
+        // MDH parameters
+        // converte the motor position from RCA to the coordinate MDH using
         std::vector<double> q_rad = {robotStates.theta[0], robotStates.theta[1],
             robotStates.theta[2], robotStates.theta[3], robotStates.theta[4],
-            robotStates.theta[5] + 90.0 / 180.0 * pi,
-            robotStates.theta[6]}; // home
-        // std::vector<double> q_rad = deg2rad(q_deg);
-        std::vector<Matrix4d> T_MDH = getT_MDH(q_rad); // basic fkine
-        for (int i = 0; i < 8; i++) {
+            robotStates.theta[5] + 90.0 / 180.0 * pi, robotStates.theta[6]};
 
-            // No flexibility
+        // basic Forware Kinematics
+        std::vector<Matrix4d> T_MDH = getT_MDH(q_rad);
+        Matrix4d fk_ori = Matrix4d::Identity();
+        for (int i = 0; i < 8; i++) {
             Matrix4d T_cur2pre_ori = T_MDH[i];
             fk_ori = fk_ori * T_cur2pre_ori;
-            // T_i2base_ori.push_back(fk_ori);
         }
-        // Compute the deformation caused by flexible joints, links, and no
-        // flexibility
         Vector4d flange_origin;
         flange_origin << 0, 0, 0, 1;
-        Vector4d ee_pos_original = fk_ori * flange_origin; // mm
+        Vector4d ee_pos_original = fk_ori * flange_origin;
         Vector3d ee_pos = ee_pos_original.head<3>();
-        // std::cout << " x from RCA   " << robotStates.flangePose[0] << ','
-        //           << robotStates.flangePose[1] << ','
-        //           << robotStates.flangePose[2] << std::endl;
-        // std::cout << " x from motor " << ee_pos[0] << ',' << ee_pos[1] << ','
-        //           << ee_pos[2] << std::endl;
-
-        //////////////////////////////////
 
         // Record data
         *myfile << robotStates.flangePose[0] << ',' << robotStates.flangePose[1]
@@ -190,6 +161,7 @@ void periodicTask(flexiv::Robot* robot, flexiv::Scheduler* scheduler,
                 << robotStates.theta[4] << ',' << robotStates.theta[5] << ','
                 << robotStates.theta[6] << ',' << ee_pos[0] << ',' << ee_pos[1]
                 << ',' << ee_pos[2] << '\n';
+
         // check max force exceed certain threshold
         if ((*move_direction) > 0
             && fabs(robotStates.extForceInTcpFrame[2])
@@ -297,7 +269,6 @@ void PressRlease(flexiv::Robot* robot, flexiv::RobotStates& robotStates,
             "HP periodic", 1, 45);
         // Start all added tasks, this is by default a blocking method
         scheduler.start();
-
         std::cout << " end!!!" << std::endl;
 
         myfile.close();
@@ -310,7 +281,7 @@ void printHelp()
     std::cout << "Required arguments: [robot IP] [local IP] [press]" << std::endl;
     std::cout << "    robot IP: address of the robot server" << std::endl;
     std::cout << "    local IP: address of this PC" << std::endl;
-    std::cout << "    press: 0 for not press, others for press" << std::endl;
+    std::cout << "    repreat press times" << std::endl;
     std::cout << std::endl;
     // clang-format on
 }
@@ -333,7 +304,6 @@ int main(int argc, char* argv[])
 
     // IP of the workstation PC running this program
     std::string localIP = argv[2];
-    // std::string argv3 = argv[3];
     int repeat_times = atoi(argv[3]);
     try {
         // RDK Initialization
@@ -378,6 +348,7 @@ int main(int argc, char* argv[])
 
         switchMode(robot, flexiv::MODE_PRIMITIVE_EXECUTION);
         log.info("Executing primitive: MoveJ");
+
         // Send command to robot
         robot.executePrimitive(
             "MoveJ(target=-90.0 -40.0 0.0 90.0 0.0 40.0 0.0)");
@@ -390,8 +361,10 @@ int main(int argc, char* argv[])
         }
 
         switchMode(robot, flexiv::MODE_PRIMITIVE_EXECUTION);
+
         ///// MoveL to pre press position /////
         log.info("Executing primitive: MoveL");
+
         // Send command to robot
         robot.executePrimitive(
             "MoveL(target=0.688 -0.25 0.051 180 0 180 WORLD  WORLD_ORIGIN, "
