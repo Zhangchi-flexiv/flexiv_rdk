@@ -380,7 +380,7 @@ int main(int argc, char* argv[])
         log.info("Executing primitive: MoveJ");
         // Send command to robot
         robot.executePrimitive(
-            "MoveJ(target=-90.0 -40.0 0.0 90.0 0.0 50.0 0.0)");
+            "MoveJ(target=-90.0 -40.0 0.0 90.0 0.0 40.0 0.0)");
 
         // Wait for reached target
         while (flexiv::utility::parsePtStates(
@@ -401,7 +401,7 @@ int main(int argc, char* argv[])
         robot.executePrimitive(
             "MoveL(target=-0.109 -0.687 0.13 180 0 90 WORLD  WORLD_ORIGIN, "
             "maxVel=0.2, "
-            "preferJntPos = -90.0 -40.0 0.0 90.0 0.0 50.0 0.0,"
+            "preferJntPos = -90.0 -40.0 0.0 90.0 0.0 40.0 0.0,"
             "targetTolLevel=1)");
 
         // Wait for reached target
